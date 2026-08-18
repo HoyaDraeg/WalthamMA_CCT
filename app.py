@@ -539,7 +539,7 @@ elif page == "Chat":
             st.caption(f"Understood as — {entry['understood']}")
             for label, df in entry["tables"]:
                 st.write(f"**{label}**")
-                st.dataframe(df, hide_index=True, width='stretch')
+                st.dataframe(df, hide_index=True, width='stretch', column_config=MINUTES_LINK_COLUMN)
 
     question = st.chat_input("Ask about a councilor, a topic, or a comparison...")
     if question:

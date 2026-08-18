@@ -29,6 +29,8 @@ STOPWORDS = {
     "please", "tell", "me", "show", "find", "know", "want", "give",
     "most", "many", "much", "often", "get", "can", "you", "your",
     "his", "her", "him", "she", "he", "them", "all", "some",
+    "usually", "typically", "generally", "normally", "always", "never",
+    "recently", "currently", "still", "also", "just", "really",
 }
 
 INTENT_KEYWORDS = {
@@ -135,7 +137,7 @@ def answer_question(question: str) -> dict:
         )
 
         sql = """
-            SELECT m.meeting_date, ai.description, va.vote AS vote_a, vb.vote AS vote_b
+            SELECT m.meeting_date, ai.description, va.vote AS vote_a, vb.vote AS vote_b, m.minutes_url
             FROM votes va
             JOIN votes vb ON vb.agenda_item_id = va.agenda_item_id AND vb.councilor_id = ?
             JOIN agenda_items ai ON ai.id = va.agenda_item_id
@@ -190,7 +192,7 @@ def answer_question(question: str) -> dict:
 
         if "sponsor" in intents:
             sql = (
-                "SELECT m.meeting_date, ai.section, ai.committee, ai.description, ai.disposition "
+                "SELECT m.meeting_date, ai.section, ai.committee, ai.description, ai.disposition, m.minutes_url "
                 "FROM agenda_items ai JOIN meetings m ON m.id = ai.meeting_id WHERE ai.sponsor_councilor_id = ?"
             )
             params = [cid]
@@ -215,7 +217,7 @@ def answer_question(question: str) -> dict:
 
         if "remarks" in intents:
             sql = (
-                "SELECT m.meeting_date, ai.committee, ai.description, r.remark_type, r.snippet "
+                "SELECT m.meeting_date, ai.committee, ai.description, r.remark_type, r.snippet, m.minutes_url "
                 "FROM remarks r JOIN agenda_items ai ON ai.id = r.agenda_item_id JOIN meetings m ON m.id = ai.meeting_id "
                 "WHERE r.councilor_id = ?"
             )
@@ -237,7 +239,7 @@ def answer_question(question: str) -> dict:
 
         if "vote" in intents and (fts_topic or committee):
             sql = """
-                SELECT m.meeting_date, ai.description, v.vote, ai.disposition
+                SELECT m.meeting_date, ai.description, v.vote, ai.disposition, m.minutes_url
                 FROM agenda_items ai
                 JOIN meetings m ON m.id = ai.meeting_id
                 LEFT JOIN votes v ON v.agenda_item_id = ai.id AND v.councilor_id = ?
@@ -267,7 +269,7 @@ def answer_question(question: str) -> dict:
         sponsored_n = conn.execute("SELECT COUNT(*) FROM agenda_items WHERE sponsor_councilor_id=?", (cid,)).fetchone()[0]
         dissents = pd.read_sql_query(
             """
-            SELECT m.meeting_date, ai.description
+            SELECT m.meeting_date, ai.description, m.minutes_url
             FROM votes v JOIN agenda_items ai ON ai.id = v.agenda_item_id JOIN meetings m ON m.id = ai.meeting_id
             WHERE v.councilor_id = ? AND v.vote = 'no' ORDER BY m.meeting_date DESC
             """,
@@ -292,7 +294,7 @@ def answer_question(question: str) -> dict:
     # -------------------------------------------------- no councilor named
     if committee or fts_topic:
         sql = (
-            "SELECT m.meeting_date, ai.section, ai.committee, ai.description, ai.disposition "
+            "SELECT m.meeting_date, ai.section, ai.committee, ai.description, ai.disposition, m.minutes_url "
             "FROM agenda_items ai JOIN meetings m ON m.id = ai.meeting_id WHERE 1=1"
         )
         params = []
