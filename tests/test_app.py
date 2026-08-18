@@ -23,7 +23,7 @@ import pytest
 import streamlit as st
 from streamlit.testing.v1 import AppTest
 
-import app
+import awards
 
 APP_PATH = str(Path(__file__).parent.parent / "app.py")
 
@@ -39,8 +39,8 @@ def clear_streamlit_cache():
 
 def test_perfect_attendance_among_active_councilors_only(seeded_db):
     ids = seeded_db["councilor_ids"]
-    awards = app.compute_awards()
-    winners, min_absent = awards["perfect_attendance"]
+    result = awards.compute_awards()
+    winners, min_absent = result["perfect_attendance"]
     assert min_absent == 0
     assert set(winners) == {ids["Anderson"], ids["Baker"], ids["Clark"]}
     assert ids["Davis"] not in winners  # inactive -- excluded from the active-only scope
@@ -49,35 +49,35 @@ def test_perfect_attendance_among_active_councilors_only(seeded_db):
 
 def test_most_dissenting(seeded_db):
     ids = seeded_db["councilor_ids"]
-    winners, max_no = app.compute_awards()["most_dissenting"]
+    winners, max_no = awards.compute_awards()["most_dissenting"]
     assert max_no == 2
     assert winners == [ids["Clark"]]
 
 
 def test_most_recused_empty_when_no_recusals_recorded(seeded_db):
-    winners, max_recused = app.compute_awards()["most_recused"]
+    winners, max_recused = awards.compute_awards()["most_recused"]
     assert winners == []
     assert max_recused == 0
 
 
 def test_high_achiever_three_way_tie(seeded_db):
     ids = seeded_db["councilor_ids"]
-    winners, max_sponsor = app.compute_awards()["high_achiever"]
+    winners, max_sponsor = awards.compute_awards()["high_achiever"]
     assert max_sponsor == 1
     assert set(winners) == {ids["Anderson"], ids["Baker"], ids["Clark"]}
 
 
 def test_similarity_awards_are_scoped_to_active_councilors(seeded_db):
     ids = seeded_db["councilor_ids"]
-    awards = app.compute_awards()
+    result = awards.compute_awards()
 
-    pairs, top_score = awards["most_similar"]
+    pairs, top_score = result["most_similar"]
     assert pairs, "expected at least one most-similar pair"
     assert 0 <= top_score <= 1
     for a, b in pairs:
         assert ids["Davis"] not in (a, b)
 
-    diff_ids, min_avg = awards["most_different"]
+    diff_ids, min_avg = result["most_different"]
     assert diff_ids
     assert 0 <= min_avg <= 1
     assert ids["Davis"] not in diff_ids
