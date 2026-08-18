@@ -86,7 +86,7 @@ def councilor_profile(councilor_id: int) -> dict:
     )
     sponsored = pd.read_sql_query(
         """
-        SELECT m.meeting_date, ai.section, ai.committee, ai.description, ai.disposition
+        SELECT m.meeting_date, ai.section, ai.committee, ai.description, ai.disposition, m.minutes_url
         FROM agenda_items ai JOIN meetings m ON m.id = ai.meeting_id
         WHERE ai.sponsor_councilor_id = ? ORDER BY m.meeting_date DESC
         """,
@@ -94,7 +94,7 @@ def councilor_profile(councilor_id: int) -> dict:
     )
     dissents = pd.read_sql_query(
         """
-        SELECT m.meeting_date, ai.description
+        SELECT m.meeting_date, ai.description, m.minutes_url
         FROM votes v
         JOIN agenda_items ai ON ai.id = v.agenda_item_id
         JOIN meetings m ON m.id = ai.meeting_id
@@ -117,6 +117,11 @@ def councilor_profile(councilor_id: int) -> dict:
         "attendance": attendance, "votes": votes, "sponsored": sponsored,
         "dissents": dissents, "remark_committees": remark_committees,
     }
+
+
+MINUTES_LINK_COLUMN = {
+    "minutes_url": st.column_config.LinkColumn("Minutes PDF", display_text="Open PDF"),
+}
 
 
 def _or(value, default):
@@ -196,7 +201,7 @@ elif page == "Councilor Profile":
     if profile["dissents"].empty:
         st.write("No recorded dissenting votes.")
     else:
-        st.dataframe(profile["dissents"], hide_index=True, width='stretch')
+        st.dataframe(profile["dissents"], hide_index=True, width='stretch', column_config=MINUTES_LINK_COLUMN)
 
     st.subheader("Topics spoken on, by committee")
     if profile["remark_committees"].empty:
@@ -205,7 +210,7 @@ elif page == "Councilor Profile":
         st.bar_chart(profile["remark_committees"].set_index("committee"))
 
     st.subheader("Items sponsored")
-    st.dataframe(profile["sponsored"], hide_index=True, width='stretch')
+    st.dataframe(profile["sponsored"], hide_index=True, width='stretch', column_config=MINUTES_LINK_COLUMN)
 
 elif page == "Compare Councilors":
     st.header("Compare two councilors")
@@ -228,7 +233,7 @@ elif page == "Compare Councilors":
     conn = get_conn()
     shared = pd.read_sql_query(
         """
-        SELECT m.meeting_date, ai.description, va.vote AS vote_a, vb.vote AS vote_b
+        SELECT m.meeting_date, ai.description, va.vote AS vote_a, vb.vote AS vote_b, m.minutes_url
         FROM votes va
         JOIN votes vb ON vb.agenda_item_id = va.agenda_item_id AND vb.councilor_id = ?
         JOIN agenda_items ai ON ai.id = va.agenda_item_id
@@ -248,7 +253,7 @@ elif page == "Compare Councilors":
         st.write(f"{len(shared)} shared roll calls, disagreed on {len(disagreements)}")
         if not disagreements.empty:
             st.write("**Where they disagreed:**")
-            st.dataframe(disagreements.drop(columns="agreed"), hide_index=True, width='stretch')
+            st.dataframe(disagreements.drop(columns="agreed"), hide_index=True, width='stretch', column_config=MINUTES_LINK_COLUMN)
 
 elif page == "Similarity Map":
     st.header("Councilor Similarity Map")
