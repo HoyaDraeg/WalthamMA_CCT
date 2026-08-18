@@ -120,6 +120,7 @@ signal actually measures here.
 | `build_similarity.py` | Vote-agreement + behavioral similarity/MDS computation |
 | `app.py` | Streamlit interactive app |
 | `qa.py` | Offline keyword Q&A backing the app's Chat page (no LLM, no tokens) |
+| `awards.py` | Councilor Awards tab superlatives |
 | `tests/` | pytest suite -- see CONTRIBUTING.md |
 
 ## Contributing
