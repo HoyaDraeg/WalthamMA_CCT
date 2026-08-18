@@ -89,7 +89,10 @@ FAVOR_OPPOSED_RE = re.compile(r"In favor:\s*(.*?)\.\s*Opposed:\s*(.*?)\.\s*")
 EXTRA_LABEL_RE = re.compile(r"(Absent|Recused|Presiding):\s*(.*?)\.\s*")
 
 DISPOSITION_RULES = [
-    ("withdrawn", re.compile(r"withdrawn", re.I)),
+    # matches "withdraw", "withdrawn", and "withdrawal" -- all appear in
+    # real minutes ("moved to withdraw...", "...was withdrawn...", "the
+    # withdrawal without prejudice").
+    ("withdrawn", re.compile(r"\bwithdraw", re.I)),
     ("tabled", re.compile(r"\btabled\b", re.I)),
     ("failed", re.compile(r"\b(?:failed|denied|defeated)\b", re.I)),
     ("referred", re.compile(r"[Rr]eferred to the (.+?) Committee")),
@@ -173,6 +176,50 @@ def make_extract_names(known_last_names: set[str]):
                 names.append(t)
         return names
     return extract_names
+
+
+PRESENT_LABEL_RE = re.compile(r"Present:\s*")
+ABSENT_LABEL_RE = re.compile(r"Absent:\s*")
+# Deliberately does NOT strip a "Councillor(s)" prefix like extract_names()
+# does -- that prefix is how ordinary narrative sentences introduce any
+# councilor's action ("Councillor Jones moved..."), so allowing it here
+# would let the scanner run straight past the end of the roster line into
+# the next, unrelated sentence and misread the first name it mentions as
+# still being part of the roster. Only President/Vice-President/VP are
+# safe to strip, since those genuinely appear inside the roster line
+# itself (naming the presiding officer).
+NAME_TOKEN_RE = re.compile(
+    r"\s*,?\s*(?:and\s+)?(?:Vice-President\s+|VP\s+|President\s+)?([A-Z][a-zA-Z\-]+)",
+    re.IGNORECASE,
+)
+
+
+def scan_name_list(text: str, pos: int, known_last_names: set[str]) -> tuple[list[str], int]:
+    """Greedily consumes a comma/'and'-separated run of known councilor
+    names starting at pos, stopping at the first token that isn't a known
+    name -- rather than requiring a trailing period like a naive regex
+    would. This matters because the top-level meeting roster line
+    sometimes runs directly into the next sentence with no punctuation at
+    all in between (a PDF-extraction artifact, e.g. "Absent: Vidal City
+    Clerk Vizard recited..." with no period after "Vidal") -- a
+    period-anchored capture either grabs way too much text or, since the
+    swallowed blob then fails extract_names()'s exact-match check, silently
+    drops the name entirely. Scanning token-by-token against the whitelist
+    stops cleanly right after the last real name regardless of what
+    punctuation (if any) follows.
+    """
+    names = []
+    while True:
+        m = NAME_TOKEN_RE.match(text, pos)
+        if not m:
+            break
+        name = m.group(1)
+        if name not in known_last_names:
+            break
+        if name not in names:
+            names.append(name)
+        pos = m.end()
+    return names, pos
 
 
 def find_roll_calls(text: str, extract_names) -> list[dict]:
@@ -342,12 +389,16 @@ def parse_meeting(text: str, known_last_names: set[str]) -> dict:
 
     result = {"attendance": [], "items": []}
 
-    att_m = re.search(r"Present:\s*(.*?)\.\s*Absent:\s*(.*?)\.\s*", flat)
-    if att_m:
-        for name in extract_names(att_m.group(1)):
+    present_label = PRESENT_LABEL_RE.search(flat)
+    if present_label:
+        present_names, pos = scan_name_list(flat, present_label.end(), known_last_names)
+        for name in present_names:
             result["attendance"].append((name, "present"))
-        for name in extract_names(att_m.group(2)):
-            result["attendance"].append((name, "absent"))
+        absent_label = ABSENT_LABEL_RE.search(flat, pos, pos + 60)
+        if absent_label:
+            absent_names, _ = scan_name_list(flat, absent_label.end(), known_last_names)
+            for name in absent_names:
+                result["attendance"].append((name, "absent"))
 
     roll_calls = find_roll_calls(flat, extract_names)
     boundaries = find_boundaries(flat)

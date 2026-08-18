@@ -18,6 +18,29 @@ py -3 -m streamlit run app.py
 See `README.md` for what each step does and what's covered so far
 (2025-present meetings; the pre-2025 archive isn't wired up yet).
 
+## Running the tests
+
+```
+py -3 -m pip install -r requirements-dev.txt
+py -3 -m pytest -v
+```
+
+The suite doesn't touch the real scraped database — `tests/conftest.py`
+points every test at a fresh temp SQLite file seeded with a small,
+hand-traceable fixture (5 councilors, 2 meetings, documented in that
+file's docstring), so it's fast and doesn't depend on network access or
+whatever's currently in your `data/`. `tests/test_parse_minutes.py` is the
+one to read first if you're touching the parser — most of its cases exist
+because of a real PDF-extraction artifact that silently dropped or
+corrupted data at some point (a page number landing mid-sentence, a
+councilor's name swallowed into an unrelated sentence, etc.), so it
+doubles as a list of "gotchas" for this kind of text.
+
+**Please run the suite before opening a PR**, and add a case to it if
+you're fixing a parsing bug — a regression test from the actual minutes
+text that exposed the bug is far more valuable than the fix alone, since
+it's what stops the same bug from quietly coming back.
+
 ## Reporting a bug or a bad parse
 
 The parser (`parse_minutes.py`) is rule-based against real Waltham minutes,
