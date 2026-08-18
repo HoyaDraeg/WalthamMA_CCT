@@ -104,6 +104,38 @@ REMARK_PATTERNS = [
     ("spoke", re.compile(r"Councillors?\s+([A-Z][a-zA-Z\-]+(?:\s*,\s*[A-Z][a-zA-Z\-]+)*(?:\s+and\s+[A-Z][a-zA-Z\-]+)?)\s+spoke\b")),
 ]
 
+# ------------------------------------------------------------------
+# "Committee of the Whole" standalone minutes are a second, shorter minutes
+# format used for some COW-only sessions (confirmed from 6 real 2025-2026
+# meetings, all of which happened to be scanned-image PDFs needing OCR).
+# Different header, different attendance phrasing, and roll-call votes
+# embedded inline in a sentence rather than the labeled block format the
+# main "Waltham City Council" minutes use, e.g.:
+#   "...adopted on a roll call vote of 11 in favor (A, B, C), 1 absent (D),
+#    2 not present at the ES meeting (E, F) and LaCava presiding."
+# The clause set and order both vary (not every meeting has all of
+# in-favor/opposed/absent/not-present, and "presiding" is only sometimes
+# present) -- parsed as a generic repeated (count, category, names) loop
+# rather than a fixed template, same approach as the main format's
+# Absent/Recused/Presiding handling.
+COW_HEADER_RE = re.compile(r"^(?:committee of the whole)\b", re.IGNORECASE)
+COW_ATTENDANCE_RE = re.compile(
+    r"call(?:ed)? the roll\s*[-—]\s*(?P<present>.*?)\s+were (?:all )?present in-person\.\s*"
+    r"(?:Councillors?\s+(?P<absent>.*?)\s+(?:was|were) absent\.)?",
+    re.IGNORECASE,
+)
+COW_ROLLCALL_TRIGGER_RE = re.compile(r"roll call vote of\s+", re.IGNORECASE)
+COW_ROLLCALL_CLAUSE_RE = re.compile(
+    r"\d+\s+(in favor|opposed|against|absent|not present[^(]*?)\s*\(([^)]*)\)\s*,?\s*(?:and\s+)?",
+    re.IGNORECASE,
+)
+COW_PRESIDING_RE = re.compile(r"(?:Vice-President\s+|President\s+|VP\s+)?([A-Z][a-zA-Z\-]+)\s+presiding", re.IGNORECASE)
+COW_BOILERPLATE_RE = re.compile(
+    r"^(committee of the whole|minutes of the meeting|\w+day\s*[-—]|clerk)|"
+    r"clerk (pro tem )?to the committee of the whole",
+    re.IGNORECASE,
+)
+
 
 PAGE_NUMBER_LINE_RE = re.compile(r"^\s*\d{1,3}\s*$")
 
@@ -132,6 +164,10 @@ def make_extract_names(known_last_names: set[str]):
         for t in tokens:
             t = t.strip().strip(".").strip()
             t = re.sub(r"^Councillors?\s*", "", t)
+            # order matters: "Vice-President"/"VP" must be tried before the
+            # plain "President" strip, or "Vice-" would be left dangling.
+            t = re.sub(r"^Vice-President\s+", "", t, flags=re.IGNORECASE)
+            t = re.sub(r"^VP\s+", "", t, flags=re.IGNORECASE)
             t = re.sub(r"^President\s+", "", t)
             if t in known_last_names and t not in names:
                 names.append(t)
@@ -223,6 +259,80 @@ def extract_remarks(item_text: str, extract_names) -> list[tuple[str, str, str]]
                 snippet = item_text[max(0, m.start() - 40): m.end() + 40].strip()
                 remarks.append((remark_type, name, snippet))
     return remarks
+
+
+def parse_committee_of_whole_meeting(raw_text: str, known_last_names: set[str]) -> dict:
+    """Parser for the shorter, separately-formatted 'Committee of the
+    Whole' standalone minutes (see format notes above COW_HEADER_RE).
+    Unlike parse_meeting(), item boundaries here are just paragraph breaks
+    in the source text -- there's no consistent section/committee
+    structure to key off of since the whole document already IS one
+    committee's minutes, and about half the real examples don't even
+    number their paragraphs."""
+    extract_names = make_extract_names(known_last_names)
+    full_flat = normalize(raw_text)
+    result = {"attendance": [], "items": []}
+
+    att_m = COW_ATTENDANCE_RE.search(full_flat)
+    if att_m:
+        for name in extract_names(att_m.group("present") or ""):
+            result["attendance"].append((name, "present"))
+        for name in extract_names(att_m.group("absent") or ""):
+            result["attendance"].append((name, "absent"))
+
+    raw_paragraphs = [p for p in re.split(r"\n\s*\n", raw_text) if p.strip()]
+    for raw_para in raw_paragraphs:
+        para = normalize(raw_para)
+        para = re.sub(r"^\d{1,2}\.\s?", "", para)  # strip leading "1." where present
+        if len(para) < 20 or COW_BOILERPLATE_RE.search(para):
+            continue
+
+        votes: dict[str, str] = {}
+        vote_type = None
+        trigger = COW_ROLLCALL_TRIGGER_RE.search(para)
+        if trigger:
+            vote_type = "roll_call"
+            pos = trigger.end()
+            while True:
+                cm = COW_ROLLCALL_CLAUSE_RE.match(para, pos)
+                if not cm:
+                    break
+                category, names_raw = cm.group(1).lower(), cm.group(2)
+                if "favor" in category:
+                    vote = "yes"
+                elif "oppose" in category or "against" in category:
+                    vote = "no"
+                else:  # "absent" or "not present at the ES meeting" etc.
+                    vote = "absent"
+                for name in extract_names(names_raw):
+                    votes[name] = vote
+                pos = cm.end()
+            pm = COW_PRESIDING_RE.match(para, pos)
+            if pm:
+                for name in extract_names(pm.group(1)):
+                    votes.setdefault(name, "presiding")
+        elif "voice vote" in para.lower():
+            vote_type = "voice"
+
+        disposition, committee_ref = detect_disposition(para)
+        remarks = extract_remarks(para, extract_names)
+        sponsor = None
+        moved_remarks = [r for r in remarks if r[0] == "moved"]
+        if moved_remarks:
+            sponsor = moved_remarks[0][1]
+
+        result["items"].append({
+            "section": "Committee of the Whole",
+            "committee": "Committee of the Whole",
+            "description": para[:500],
+            "disposition": disposition,
+            "sponsor_last_name": sponsor,
+            "vote_type": vote_type,
+            "votes": votes,
+            "remarks": remarks,
+        })
+
+    return result
 
 
 def parse_meeting(text: str, known_last_names: set[str]) -> dict:
@@ -352,9 +462,14 @@ def main() -> None:
 
     rows = conn.execute("SELECT id, doc_id, raw_text FROM meetings WHERE raw_text IS NOT NULL AND raw_text != ''").fetchall()
     now = datetime.now(timezone.utc).isoformat()
-    n_items, n_votes, n_roll_call_items = 0, 0, 0
+    n_items, n_votes, n_roll_call_items, n_cow = 0, 0, 0, 0
     for row in rows:
-        parsed = parse_meeting(row["raw_text"], known)
+        is_cow = bool(COW_HEADER_RE.match(row["raw_text"].strip()))
+        if is_cow:
+            parsed = parse_committee_of_whole_meeting(row["raw_text"], known)
+            n_cow += 1
+        else:
+            parsed = parse_meeting(row["raw_text"], known)
         store_parsed_meeting(conn, row["id"], parsed, name_to_id)
         conn.execute("UPDATE meetings SET parsed_at = ? WHERE id = ?", (now, row["id"]))
         n_items += len(parsed["items"])
@@ -362,7 +477,10 @@ def main() -> None:
         n_roll_call_items += sum(1 for item in parsed["items"] if item["vote_type"] == "roll_call")
     conn.commit()
     conn.close()
-    print(f"Parsed {len(rows)} meetings: {n_items} agenda items, {n_roll_call_items} roll-call items, {n_votes} individual votes recorded")
+    print(
+        f"Parsed {len(rows)} meetings ({n_cow} standalone Committee of the Whole minutes): "
+        f"{n_items} agenda items, {n_roll_call_items} roll-call items, {n_votes} individual votes recorded"
+    )
 
 
 if __name__ == "__main__":

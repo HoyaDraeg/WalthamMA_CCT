@@ -5,3 +5,10 @@ pandas>=2.0
 scikit-learn>=1.4
 streamlit>=1.32
 plotly>=5.20
+
+# OCR fallback for scanned-image minutes PDFs (extract_text.py). Also
+# requires the Tesseract OCR engine installed separately -- it's a
+# compiled binary, not something pip can install. See README.
+pytesseract>=0.3
+PyMuPDF>=1.24
+Pillow>=10.0

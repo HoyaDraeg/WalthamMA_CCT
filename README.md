@@ -23,6 +23,16 @@ file). The other four steps can just be re-run any time to pick up new
 meetings -- each is idempotent (upserts by AgendaCenter doc id), or use the
 "Refresh data" button in the app sidebar, which runs all four in sequence.
 
+**Optional: OCR for scanned-image minutes.** A handful of minutes PDFs are
+scanned images with no text layer at all rather than the usual born-digital
+PDF (confirmed real minutes, not blank/cancelled meetings). `extract_text.py`
+falls back to OCR for those, but that requires the [Tesseract OCR
+engine](https://github.com/UB-Mannheim/tesseract/wiki) installed separately
+-- it's a compiled binary, not something `pip install` can pull in. On
+Windows: `winget install --id UB-Mannheim.TesseractOCR -e`. Without it,
+`extract_text.py` still runs fine and just prints a warning; those specific
+meetings will stay unparsed until Tesseract is installed and it's re-run.
+
 ## What's covered
 
 - **2025-present** meetings from the CivicPlus AgendaCenter
@@ -42,7 +52,7 @@ meetings -- each is idempotent (upserts by AgendaCenter doc id), or use the
 ## The "ideology" chart
 
 Real 2025-2026 data shows Waltham's council is overwhelmingly
-consensus-driven: of 91 roll-call votes captured so far, only 10 had any
+consensus-driven: of 96 roll-call votes captured so far, only 11 had any
 dissenting vote at all. A pure yes/no vote-agreement score (the classic
 GovTrack/DW-NOMINATE approach) would barely distinguish most councilors.
 The Similarity Map in the app therefore combines roll-call agreement with
@@ -60,19 +70,34 @@ signal actually measures here.
   is unverified. Extending `fetch_meetings.py` to cover this is a
   reasonable phase 2 -- likely needs a browser-automation fetch for the
   listing, then the same text-layer check `extract_text.py` already does.
-- **6 of 61 fetched minutes PDFs extracted zero text** -- they're
-  single-page, single-image PDFs (likely meeting-cancellation notices, not
-  full minutes). They're stored but contribute no parsed data. Not
-  investigated further since they didn't look like real minutes.
+- **Two different minutes formats are handled.** Most minutes are the full
+  "Waltham City Council" format (`parse_meeting()`). A second, shorter
+  format is used for standalone "Committee of the Whole" sessions
+  (`parse_committee_of_whole_meeting()`) -- different header, different
+  attendance phrasing, and roll-call votes written inline in a sentence
+  ("...on a roll call vote of 11 in favor (...), 1 absent (...) ... and
+  LaCava presiding") rather than the main format's labeled block. This was
+  only discovered because 6 minutes PDFs needed OCR (see below) and turned
+  out, on manual review, to be this second format -- which also revealed 6
+  *more* meetings already had normal PDF text but were being silently
+  mis-parsed by the main-format parser before this fix. If a future
+  meeting shows up with yet another format variant, expect similarly
+  wrong-not-missing results until it's specifically handled -- this parser
+  only knows the formats it's been shown.
+- **6 of 67 fetched minutes PDFs are scanned images with no text layer**,
+  confirmed as real minutes (not cancellation notices) by manual review.
+  `extract_text.py` OCRs these via Tesseract (see Setup) -- without
+  Tesseract installed, they stay unparsed rather than crashing anything.
 - **The parser is rule-based, not a formal grammar**, built against real
-  minutes but covering a specific narrative style. It's rigorously checked
-  against actual roll-call blocks (validated against two full source
-  documents by hand, matching 100% including every "Absent"/"Recused"
-  ordering quirk and PDF-extraction artifact found). Item/committee/
-  disposition tagging and floor-remark attribution are best-effort and can
-  occasionally mis-bucket an item in an unusual meeting; the FTS search
-  matches on the stored description text, so a mis-tagged section doesn't
-  hide an item from search, it just files it oddly.
+  minutes but covering specific narrative styles (two, now). It's
+  rigorously checked against actual roll-call blocks (validated against
+  four full source documents by hand across both formats, matching 100%
+  including every "Absent"/"Recused" ordering quirk and PDF-extraction
+  artifact found). Item/committee/disposition tagging and floor-remark
+  attribution are best-effort and can occasionally mis-bucket an item in
+  an unusual meeting; the FTS search matches on the stored description
+  text, so a mis-tagged section doesn't hide an item from search, it just
+  files it oddly.
 - **PDF text extraction artifacts**: pypdf occasionally inserts a spurious
   space mid-word (e.g. "requested" -> "re quested") and some meetings use a
   Wingdings-style Private-Use-Area bullet glyph instead of a normal
