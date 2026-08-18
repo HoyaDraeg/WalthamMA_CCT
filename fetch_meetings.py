@@ -37,7 +37,7 @@ BASE = "https://www.city.waltham.ma.us"
 LIST_URL = f"{BASE}/AgendaCenter/City-Council-2/"
 YEAR_URL = f"{BASE}/AgendaCenter/UpdateCategoryList"
 CITY_COUNCIL_CAT_ID = 2
-USER_AGENT = "waltham-council-tracker/0.1 (personal project; contact: YOUR_EMAIL_HERE)"
+USER_AGENT = "waltham-council-tracker/0.1 (personal project; contact: 134563766+HoyaDraeg@users.noreply.github.com)"
 
 DATE_RE = re.compile(r"^\d{8}-\d+$")
 

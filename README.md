@@ -94,3 +94,9 @@ signal actually measures here.
 | `parse_minutes.py` | Core parser: votes, attendance, agenda items, remarks |
 | `build_similarity.py` | Vote-agreement + behavioral similarity/MDS computation |
 | `app.py` | Streamlit interactive app |
+| `qa.py` | Offline keyword Q&A backing the app's Chat page (no LLM, no tokens) |
+
+## Contributing
+
+Bug reports and feature ideas are welcome — see `CONTRIBUTING.md` for how
+to run it locally and what's useful to include in an issue.

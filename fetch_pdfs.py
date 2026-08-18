@@ -14,7 +14,7 @@ import requests
 from db import get_conn
 
 PDF_DIR = Path(__file__).parent / "data" / "pdfs"
-USER_AGENT = "waltham-council-tracker/0.1 (personal project; contact: YOUR_EMAIL_HERE)"
+USER_AGENT = "waltham-council-tracker/0.1 (personal project; contact: 134563766+HoyaDraeg@users.noreply.github.com)"
 
 
 def _download(session: requests.Session, url: str, dest: Path) -> bool:
