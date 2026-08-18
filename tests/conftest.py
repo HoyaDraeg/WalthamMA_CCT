@@ -44,6 +44,27 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 import db  # noqa: E402
 
 
+@pytest.fixture(autouse=True)
+def _no_real_db_by_default(monkeypatch, tmp_path):
+    """Points db.DB_PATH at a file that doesn't exist, for EVERY test,
+    whether or not it requests `seeded_db`.
+
+    This exists because of a real failure mode: a test that calls into
+    qa.py/build_similarity.py/app.py but forgets to declare `seeded_db` as
+    a parameter doesn't error out locally -- it silently falls through to
+    whatever db.DB_PATH currently is, which on a dev machine that's ever
+    run the real scraper is the real populated database. The test can
+    then pass for the wrong reason (real data happens to satisfy the
+    assertion) while being completely broken in CI, which starts from a
+    clean checkout with no database at all. This fixture makes that
+    failure mode impossible to miss locally: forget `seeded_db` and the
+    test fails immediately with "no such table", every time, everywhere --
+    not just in CI. `seeded_db` runs after this one and overwrites
+    DB_PATH with its own real (seeded) temp database, so it's unaffected.
+    """
+    monkeypatch.setattr(db, "DB_PATH", tmp_path / "should_not_be_used.db")
+
+
 @pytest.fixture
 def seeded_db(monkeypatch, tmp_path):
     monkeypatch.setattr(db, "DB_PATH", tmp_path / "test_waltham_council.db")

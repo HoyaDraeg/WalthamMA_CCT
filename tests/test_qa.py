@@ -138,7 +138,7 @@ def test_answer_question_sponsor_intent_with_committee_filter(seeded_db):
     assert "setback" in df.iloc[0]["description"]
 
 
-def test_answer_question_no_councilor_no_topic_gives_help_text():
+def test_answer_question_no_councilor_no_topic_gives_help_text(seeded_db):
     # a question made entirely of stopwords leaves no topic at all --
     # distinct from a question with real (if unmatched) words, which
     # correctly falls through to a topic search instead (see the general
