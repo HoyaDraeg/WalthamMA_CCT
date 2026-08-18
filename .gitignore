@@ -1,0 +1,22 @@
+__pycache__/
+*.pyc
+data/
+
+# virtual environments (contributors will likely use one even though this
+# project's own setup doesn't)
+.venv/
+venv/
+env/
+
+# streamlit
+.streamlit/
+streamlit.log
+
+# editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# env vars / secrets, in case a future contributor adds an API key etc.
+.env
