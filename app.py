@@ -149,7 +149,7 @@ def run_refresh():
 # ---------------------------------------------------------------- sidebar
 
 st.sidebar.title("Waltham City Council Tracker")
-page = st.sidebar.radio("View", ["Topic Search", "Councilor Profile", "Compare Councilors", "Similarity Map", "Chat"])
+page = st.sidebar.radio("View", ["Councilor Profile", "Compare Councilors", "Similarity Map", "Topic Search", "Chat"])
 st.sidebar.divider()
 if st.sidebar.button("Refresh data from AgendaCenter"):
     run_refresh()
@@ -159,28 +159,7 @@ active = councilors[councilors["active"] == 1]
 
 # ---------------------------------------------------------------- pages
 
-if page == "Topic Search":
-    st.header("Search votes & statements by topic")
-    query = st.text_input("Keyword (e.g. \"affordable housing\", \"Mt Walley Road\", \"zoning\")")
-    if query:
-        results = search_topic(query)
-        st.write(f"{len(results)} matching agenda items")
-        for _, row in results.iterrows():
-            committee_suffix = f"/{row['committee']}" if pd.notna(row["committee"]) else ""
-            with st.expander(f"{row['meeting_date']} — [{row['section']}{committee_suffix}] {row['description'][:120]}"):
-                st.write(row["description"])
-                st.caption(f"Disposition: {_or(row['disposition'], 'unknown')} | Vote type: {_or(row['vote_type'], 'not recorded')}")
-                detail = load_item_detail(row["id"])
-                if not detail["votes"].empty:
-                    st.write("**Votes:**")
-                    st.dataframe(detail["votes"], hide_index=True, width='stretch')
-                if not detail["remarks"].empty:
-                    st.write("**Remarks:**")
-                    st.dataframe(detail["remarks"], hide_index=True, width='stretch')
-    else:
-        st.info("Enter a keyword above to search agenda items, votes, and remarks.")
-
-elif page == "Councilor Profile":
+if page == "Councilor Profile":
     st.header("Councilor Profile")
     name_map = dict(zip(active["full_name"] + " (" + active["seat"] + ")", active["id"]))
     choice = st.selectbox("Councilor", list(name_map.keys()))
@@ -326,6 +305,27 @@ elif page == "Similarity Map":
     ))
     heat.update_layout(xaxis_title="Councilor", yaxis_title="Councilor", height=600)
     st.plotly_chart(heat, width='stretch')
+
+elif page == "Topic Search":
+    st.header("Search votes & statements by topic")
+    query = st.text_input("Keyword (e.g. \"affordable housing\", \"Mt Walley Road\", \"zoning\")")
+    if query:
+        results = search_topic(query)
+        st.write(f"{len(results)} matching agenda items")
+        for _, row in results.iterrows():
+            committee_suffix = f"/{row['committee']}" if pd.notna(row["committee"]) else ""
+            with st.expander(f"{row['meeting_date']} — [{row['section']}{committee_suffix}] {row['description'][:120]}"):
+                st.write(row["description"])
+                st.caption(f"Disposition: {_or(row['disposition'], 'unknown')} | Vote type: {_or(row['vote_type'], 'not recorded')}")
+                detail = load_item_detail(row["id"])
+                if not detail["votes"].empty:
+                    st.write("**Votes:**")
+                    st.dataframe(detail["votes"], hide_index=True, width='stretch')
+                if not detail["remarks"].empty:
+                    st.write("**Remarks:**")
+                    st.dataframe(detail["remarks"], hide_index=True, width='stretch')
+    else:
+        st.info("Enter a keyword above to search agenda items, votes, and remarks.")
 
 elif page == "Chat":
     st.header("Chat")
