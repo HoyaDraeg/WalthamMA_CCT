@@ -40,6 +40,91 @@ def load_similarity():
 
 
 @st.cache_data(ttl=60)
+def compute_awards() -> dict:
+    """Superlatives over the current active councilors (same scope as the
+    Councilor Profile / Compare dropdowns elsewhere in the app)."""
+    conn = get_conn()
+    councilors_df = pd.read_sql_query("SELECT * FROM councilors WHERE active = 1", conn)
+    ids = councilors_df["id"].tolist()
+
+    att = pd.read_sql_query("SELECT councilor_id, status, COUNT(*) n FROM attendance GROUP BY councilor_id, status", conn)
+    att_pivot = att.pivot(index="councilor_id", columns="status", values="n").reindex(ids).fillna(0)
+    for col in ("present", "absent"):
+        if col not in att_pivot.columns:
+            att_pivot[col] = 0
+
+    votes = pd.read_sql_query("SELECT councilor_id, vote, COUNT(*) n FROM votes GROUP BY councilor_id, vote", conn)
+    votes_pivot = votes.pivot(index="councilor_id", columns="vote", values="n").reindex(ids).fillna(0)
+    for col in ("no", "recused"):
+        if col not in votes_pivot.columns:
+            votes_pivot[col] = 0
+
+    sponsor = (
+        pd.read_sql_query(
+            "SELECT sponsor_councilor_id AS councilor_id, COUNT(*) n FROM agenda_items "
+            "WHERE sponsor_councilor_id IS NOT NULL GROUP BY sponsor_councilor_id",
+            conn,
+        )
+        .set_index("councilor_id")["n"]
+        .reindex(ids)
+        .fillna(0)
+    )
+    conn.close()
+
+    sim = compute_similarity()
+    combined = sim["combined_similarity"].loc[ids, ids]
+
+    # 1. Perfect attendance: fewest absences, among councilors who have
+    # actually got at least one attendance record (so someone with zero
+    # tracked meetings can't "win" by default).
+    has_att = att_pivot[(att_pivot["present"] + att_pivot["absent"]) > 0]
+    min_absent = has_att["absent"].min() if not has_att.empty else None
+    perfect_attendance_ids = has_att.index[has_att["absent"] == min_absent].tolist() if min_absent is not None else []
+
+    # 2. Most dissenting: most "no" votes.
+    max_no = votes_pivot["no"].max() if not votes_pivot.empty else 0
+    most_dissenting_ids = votes_pivot.index[votes_pivot["no"] == max_no].tolist() if max_no > 0 else []
+
+    # 3. Most recused.
+    max_recused = votes_pivot["recused"].max() if not votes_pivot.empty else 0
+    most_recused_ids = votes_pivot.index[votes_pivot["recused"] == max_recused].tolist() if max_recused > 0 else []
+
+    # 4. Most similar: the single highest-scoring pair (or pairs, if tied).
+    pairs = []
+    for i, a in enumerate(combined.index):
+        for b in combined.index[i + 1:]:
+            pairs.append((combined.loc[a, b], a, b))
+    pairs.sort(key=lambda p: p[0], reverse=True)
+    top_score = pairs[0][0] if pairs else None
+    most_similar_pairs = [(a, b) for score, a, b in pairs if score == top_score] if pairs else []
+
+    # 5. Most different than everyone else: lowest AVERAGE similarity to
+    # all other councilors (an outlier from the whole group), not just the
+    # single most-dissimilar pair -- that's a distinct thing from #4.
+    avg_sim = combined.apply(lambda row: row.drop(row.name).mean(), axis=1)
+    min_avg = avg_sim.min() if not avg_sim.empty else None
+    most_different_ids = avg_sim.index[avg_sim == min_avg].tolist() if min_avg is not None else []
+
+    # 6. High achiever: most sponsored/moved items.
+    max_sponsor = sponsor.max() if not sponsor.empty else 0
+    high_achiever_ids = sponsor.index[sponsor == max_sponsor].tolist() if max_sponsor > 0 else []
+
+    return {
+        "councilors_df": councilors_df.set_index("id"),
+        "attendance_table": has_att,
+        "votes_table": votes_pivot,
+        "sponsor_table": sponsor,
+        "avg_similarity": avg_sim,
+        "perfect_attendance": (perfect_attendance_ids, min_absent),
+        "most_dissenting": (most_dissenting_ids, max_no),
+        "most_recused": (most_recused_ids, max_recused),
+        "most_similar": (most_similar_pairs, top_score),
+        "most_different": (most_different_ids, min_avg),
+        "high_achiever": (high_achiever_ids, max_sponsor),
+    }
+
+
+@st.cache_data(ttl=60)
 def search_topic(query: str) -> pd.DataFrame:
     conn = get_conn()
     df = pd.read_sql_query(
@@ -149,7 +234,7 @@ def run_refresh():
 # ---------------------------------------------------------------- sidebar
 
 st.sidebar.title("Waltham City Council Tracker")
-page = st.sidebar.radio("View", ["Councilor Profile", "Compare Councilors", "Similarity Map", "Topic Search", "Chat"])
+page = st.sidebar.radio("View", ["Councilor Profile", "Compare Councilors", "Similarity Map", "Topic Search", "Awards", "Chat"])
 st.sidebar.divider()
 if st.sidebar.button("Refresh data from AgendaCenter"):
     run_refresh()
@@ -326,6 +411,103 @@ elif page == "Topic Search":
                     st.dataframe(detail["remarks"], hide_index=True, width='stretch')
     else:
         st.info("Enter a keyword above to search agenda items, votes, and remarks.")
+
+elif page == "Awards":
+    st.header("Councilor Awards")
+    st.caption(
+        "Superlatives computed from every meeting tracked so far, restricted to the 15 "
+        "current active councilors (same scope as the Profile/Compare dropdowns). Ties are "
+        "shown as a group rather than picking one arbitrarily — with 96 roll calls and a "
+        "handful of meetings, several of these are close."
+    )
+    awards = compute_awards()
+    cdf = awards["councilors_df"]
+
+    def _names(ids):
+        return " & ".join(sorted(cdf.loc[i, "full_name"] for i in ids))
+
+    def _award_card(col, emoji, title, winners_line, stat_line, blurb, expander_label=None, expander_df=None):
+        with col.container(border=True):
+            st.subheader(f"{emoji} {title}")
+            if winners_line:
+                st.markdown(f"**{winners_line}**")
+                st.caption(stat_line)
+            else:
+                st.write("Not enough data yet.")
+            st.caption(blurb)
+            if expander_df is not None and not expander_df.empty:
+                with st.expander(expander_label or "Full ranking"):
+                    st.dataframe(expander_df, hide_index=True, width='stretch')
+
+    row1 = st.columns(2)
+    row2 = st.columns(2)
+    row3 = st.columns(2)
+
+    ids, min_absent = awards["perfect_attendance"]
+    att_table = awards["attendance_table"].join(cdf[["full_name"]]).sort_values("absent")
+    att_table = att_table[["full_name", "present", "absent"]].rename(columns={"full_name": "Councilor", "present": "Present", "absent": "Absent"})
+    _award_card(
+        row1[0], "🏅", "Perfect Attendance",
+        _names(ids) if ids else None,
+        f"{int(min_absent)} absence(s) recorded" if min_absent is not None else "",
+        "Fewest recorded absences, among councilors with at least one tracked meeting.",
+        "Full attendance ranking", att_table,
+    )
+
+    ids, max_no = awards["most_dissenting"]
+    dissent_table = awards["votes_table"][["no"]].join(cdf[["full_name"]]).sort_values("no", ascending=False)
+    dissent_table = dissent_table[["full_name", "no"]].rename(columns={"full_name": "Councilor", "no": "No votes"})
+    _award_card(
+        row1[1], "🔥", "Most Dissenting",
+        _names(ids) if ids else None,
+        f"{int(max_no)} 'no' vote(s) on record" if ids else "",
+        "Most roll-call votes cast against the majority.",
+        "Full dissent ranking", dissent_table,
+    )
+
+    ids, max_recused = awards["most_recused"]
+    recused_table = awards["votes_table"][["recused"]].join(cdf[["full_name"]]).sort_values("recused", ascending=False)
+    recused_table = recused_table[["full_name", "recused"]].rename(columns={"full_name": "Councilor", "recused": "Recusals"})
+    _award_card(
+        row2[0], "🙅", "Most Recused",
+        _names(ids) if ids else None,
+        f"{int(max_recused)} recusal(s) on record" if ids else "",
+        "Most roll-call votes sat out due to a conflict of interest.",
+        "Full recusal ranking", recused_table,
+    )
+
+    ids, max_sponsor = awards["high_achiever"]
+    sponsor_table = awards["sponsor_table"].rename("Sponsored").to_frame().join(cdf[["full_name"]]).sort_values("Sponsored", ascending=False)
+    sponsor_table = sponsor_table[["full_name", "Sponsored"]].rename(columns={"full_name": "Councilor"})
+    _award_card(
+        row2[1], "🚀", "High Achiever",
+        _names(ids) if ids else None,
+        f"{int(max_sponsor)} item(s) sponsored/moved" if ids else "",
+        "Most agenda items moved or sponsored.",
+        "Full sponsorship ranking", sponsor_table,
+    )
+
+    pairs, top_score = awards["most_similar"]
+    pairs_line = "; ".join(_names([a, b]) for a, b in pairs) if pairs else None
+    _award_card(
+        row3[0], "🤝", "Most Similar",
+        pairs_line,
+        f"{top_score:.0%} combined similarity" if top_score is not None else "",
+        "The pair (or pairs, if tied) with the single highest vote + behavior similarity score.",
+    )
+
+    ids, min_avg = awards["most_different"]
+    diff_table = awards["avg_similarity"].rename("Avg. similarity").to_frame().join(cdf[["full_name"]]).sort_values("Avg. similarity")
+    diff_table = diff_table[["full_name", "Avg. similarity"]].rename(columns={"full_name": "Councilor"})
+    diff_table["Avg. similarity"] = (diff_table["Avg. similarity"] * 100).round(1).astype(str) + "%"
+    _award_card(
+        row3[1], "🦄", "Most Different",
+        _names(ids) if ids else None,
+        f"{min_avg:.0%} average similarity to everyone else" if min_avg is not None else "",
+        "Lowest AVERAGE similarity across every other councilor — an outlier from the whole "
+        "group, not just from one other person (that's the 'Most Similar' award, mirrored).",
+        "Full average-similarity ranking", diff_table,
+    )
 
 elif page == "Chat":
     st.header("Chat")
